@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpsPilot Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f1419;
+            color: #e7e9ea;
+            min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid #2f3336;
+            margin-bottom: 20px;
+        }
+        h1 { font-size: 24px; font-weight: 600; }
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status-online { background: #00ba7c; color: #fff; }
+        .status-offline { background: #f4212e; color: #fff; }
+        .agents-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+        .agent-chip {
+            padding: 8px 16px;
+            background: #1d1f23;
+            border: 1px solid #2f3336;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .agent-chip:hover { background: #2f3336; }
+        .agent-chip.active { border-color: #1d9bf0; }
+        .agent-chip .hostname { font-weight: 500; }
+        .agent-chip .id { font-size: 11px; color: #71767b; }
+        .toolbar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .btn-primary { background: #1d9bf0; color: #fff; }
+        .btn-primary:hover { background: #1a8cd8; }
+        .btn-primary:disabled { background: #2f3336; color: #71767b; cursor: not-allowed; }
+        .btn-secondary { background: #2f3336; color: #e7e9ea; }
+        .btn-secondary:hover { background: #3a3d41; }
+        .selected-count { color: #71767b; font-size: 14px; }
+        .filters { display: flex; gap: 8px; margin-left: auto; }
+        .filter-chip {
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px solid #2f3336;
+            border-radius: 20px;
+            color: #71767b;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .filter-chip:hover { border-color: #71767b; }
+        .filter-chip.active { border-color: #1d9bf0; color: #1d9bf0; }
+        .incidents-table {
+            background: #1d1f23;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #2f3336;
+        }
+        .table-header {
+            display: grid;
+            grid-template-columns: 40px 1fr 120px 150px 100px 120px;
+            padding: 12px 16px;
+            background: #16181c;
+            border-bottom: 1px solid #2f3336;
+            font-size: 12px;
+            color: #71767b;
+            text-transform: uppercase;
+        }
+        .group-header {
+            padding: 12px 16px;
+            background: #16181c;
+            border-bottom: 1px solid #2f3336;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .group-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+        .group-icon.log { background: #1d9bf0; }
+        .group-icon.host { background: #00ba7c; }
+        .group-icon.docker { background: #2496ed; }
+        .group-icon.systemd { background: #f4212e; }
+        .group-count {
+            margin-left: auto;
+            background: #2f3336;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
+        .incident-row {
+            display: grid;
+            grid-template-columns: 40px 1fr 120px 150px 100px 120px;
+            padding: 12px 16px;
+            border-bottom: 1px solid #2f3336;
+            align-items: center;
+        }
+        .incident-row:hover { background: #16181c; }
+        .incident-row input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+        .incident-source { font-family: monospace; font-size: 13px; color: #1d9bf0; }
+        .incident-type { font-size: 13px; }
+        .incident-time { font-size: 12px; color: #71767b; }
+        .incident-status { padding: 4px 8px; border-radius: 4px; font-size: 12px; text-align: center; }
+        .incident-status.new { background: #1d9bf01a; color: #1d9bf0; }
+        .incident-status.analyzed { background: #00ba7c1a; color: #00ba7c; }
+        .btn-small { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #1d1f23;
+            border-radius: 16px;
+            max-width: 700px;
+            width: 90%;
+            max-height: 80vh;
+            overflow: hidden;
+            border: 1px solid #2f3336;
+        }
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #2f3336;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-close { background: none; border: none; color: #71767b; font-size: 24px; cursor: pointer; }
+        .modal-body { padding: 20px; overflow-y: auto; max-height: 60vh; }
+        .detail-section { margin-bottom: 20px; }
+        .detail-section h3 { font-size: 12px; color: #71767b; text-transform: uppercase; margin-bottom: 8px; }
+        .detail-section pre {
+            background: #16181c;
+            padding: 12px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .ai-analysis {
+            background: #00ba7c1a;
+            border: 1px solid #00ba7c33;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .ai-analysis h4 { color: #00ba7c; margin-bottom: 8px; }
+        .loading { text-align: center; padding: 40px; color: #71767b; }
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid #2f3336;
+            border-top-color: #1d9bf0;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .empty-state { text-align: center; padding: 60px 20px; color: #71767b; }
+        .empty-state h3 { margin-bottom: 8px; color: #e7e9ea; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>OpsPilot Dashboard</h1>
+            <div id="connection-status" class="status-badge status-offline">Disconnected</div>
+        </header>
+        <div class="agents-bar" id="agents-bar"></div>
+        <div class="toolbar">
+            <button class="btn btn-primary" id="analyze-btn" disabled>Analyze with AI</button>
+            <span class="selected-count" id="selected-count">0 selected</span>
+            <div class="filters">
+                <button class="filter-chip active" data-filter="all">All</button>
+                <button class="filter-chip" data-filter="log">Log</button>
+                <button class="filter-chip" data-filter="host">Host</button>
+                <button class="filter-chip" data-filter="docker">Docker</button>
+                <button class="filter-chip" data-filter="systemd">Systemd</button>
+            </div>
+        </div>
+        <div class="incidents-table" id="incidents-table">
+            <div class="table-header">
+                <input type="checkbox" id="select-all">
+                <span>Source</span>
+                <span>Type</span>
+                <span>Time</span>
+                <span>Status</span>
+                <span>Actions</span>
+            </div>
+            <div id="incidents-body"></div>
+        </div>
+    </div>
+    <div class="modal-overlay" id="detail-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Incident Details</h2>
+                <button class="modal-close" id="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+    <script>
+        const state = { agents: [], incidents: [], selectedAgent: null, selected: new Set(), filter: 'all' };
+        const $ = id => document.getElementById(id);
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.textContent;
+        }
+
+        async function loadAgents() {
+            try {
+                const res = await fetch('/v1/agents');
+                state.agents = await res.json() || [];
+                renderAgents();
+                $('connection-status').className = 'status-badge status-online';
+                $('connection-status').textContent = 'Connected';
+            } catch (e) { console.error(e); }
+        }
+
+        function renderAgents() {
+            const bar = $('agents-bar');
+            bar.textContent = '';
+            if (!state.agents.length) {
+                bar.textContent = 'No agents registered';
+                return;
+            }
+            state.agents.forEach(a => {
+                const chip = document.createElement('div');
+                chip.className = 'agent-chip' + (state.selectedAgent === a.id ? ' active' : '');
+                chip.onclick = () => selectAgent(a.id);
+                const hostname = document.createElement('div');
+                hostname.className = 'hostname';
+                hostname.textContent = a.hostname || 'unknown';
+                const id = document.createElement('div');
+                id.className = 'id';
+                id.textContent = a.id.slice(0, 8) + '...';
+                const badge = document.createElement('span');
+                badge.className = 'status-badge ' + (a.status === 'online' ? 'status-online' : 'status-offline');
+                badge.style.cssText = 'font-size:10px;padding:2px 6px;margin-left:8px';
+                badge.textContent = a.status;
+                chip.appendChild(hostname);
+                chip.appendChild(id);
+                chip.appendChild(badge);
+                bar.appendChild(chip);
+            });
+        }
+
+        async function selectAgent(id) {
+            state.selectedAgent = id;
+            renderAgents();
+            await loadIncidents(id);
+        }
+
+        async function loadIncidents(agentId) {
+            try {
+                const res = await fetch('/v1/agents/' + agentId + '/incidents');
+                state.incidents = await res.json() || [];
+                state.selected.clear();
+                renderIncidents();
+            } catch (e) { console.error(e); }
+        }
+
+        function renderIncidents() {
+            const body = $('incidents-body');
+            body.textContent = '';
+            let filtered = state.incidents;
+            if (state.filter !== 'all') {
+                filtered = state.incidents.filter(i => i.type && i.type.includes(state.filter));
+            }
+            if (!filtered.length) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                const h3 = document.createElement('h3');
+                h3.textContent = 'No incidents';
+                const p = document.createElement('p');
+                p.textContent = state.filter !== 'all' ? 'Try a different filter' : 'No incidents recorded';
+                empty.appendChild(h3);
+                empty.appendChild(p);
+                body.appendChild(empty);
+                updateCount();
+                return;
+            }
+            const groups = {};
+            filtered.forEach(i => {
+                const type = (i.type || 'other').split('_')[0];
+                if (!groups[type]) groups[type] = [];
+                groups[type].push(i);
+            });
+            for (const [type, items] of Object.entries(groups)) {
+                const header = document.createElement('div');
+                header.className = 'group-header';
+                const icon = document.createElement('div');
+                icon.className = 'group-icon ' + type;
+                icon.textContent = type.charAt(0).toUpperCase();
+                const label = document.createElement('span');
+                label.textContent = type.charAt(0).toUpperCase() + type.slice(1) + ' Events';
+                const count = document.createElement('span');
+                count.className = 'group-count';
+                count.textContent = items.length;
+                header.appendChild(icon);
+                header.appendChild(label);
+                header.appendChild(count);
+                body.appendChild(header);
+                items.forEach(i => {
+                    const row = document.createElement('div');
+                    row.className = 'incident-row';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.checked = state.selected.has(i.id);
+                    cb.onchange = () => toggleSelect(i.id);
+                    const source = document.createElement('span');
+                    source.className = 'incident-source';
+                    source.textContent = i.source || 'N/A';
+                    const typeSpan = document.createElement('span');
+                    typeSpan.className = 'incident-type';
+                    typeSpan.textContent = i.type;
+                    const time = document.createElement('span');
+                    time.className = 'incident-time';
+                    time.textContent = new Date(i.created_at).toLocaleString();
+                    const status = document.createElement('span');
+                    status.className = 'incident-status ' + (i.ai_analysis ? 'analyzed' : 'new');
+                    status.textContent = i.ai_analysis ? 'analyzed' : 'new';
+                    const actions = document.createElement('div');
+                    actions.className = 'incident-actions';
+                    const viewBtn = document.createElement('button');
+                    viewBtn.className = 'btn btn-secondary btn-small';
+                    viewBtn.textContent = 'View';
+                    viewBtn.onclick = () => showDetail(i.id);
+                    actions.appendChild(viewBtn);
+                    row.appendChild(cb);
+                    row.appendChild(source);
+                    row.appendChild(typeSpan);
+                    row.appendChild(time);
+                    row.appendChild(status);
+                    row.appendChild(actions);
+                    body.appendChild(row);
+                });
+            }
+            updateCount();
+        }
+
+        function toggleSelect(id) {
+            if (state.selected.has(id)) state.selected.delete(id);
+            else state.selected.add(id);
+            updateCount();
+        }
+
+        function updateCount() {
+            $('selected-count').textContent = state.selected.size + ' selected';
+            $('analyze-btn').disabled = state.selected.size === 0;
+        }
+
+        $('select-all').onchange = e => {
+            const filtered = state.filter === 'all' ? state.incidents :
+                state.incidents.filter(i => i.type && i.type.includes(state.filter));
+            if (e.target.checked) filtered.forEach(i => state.selected.add(i.id));
+            else state.selected.clear();
+            renderIncidents();
+        };
+
+        document.querySelectorAll('.filter-chip').forEach(chip => {
+            chip.onclick = () => {
+                document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                state.filter = chip.dataset.filter;
+                renderIncidents();
+            };
+        });
+
+        $('analyze-btn').onclick = async () => {
+            const btn = $('analyze-btn');
+            btn.disabled = true;
+            btn.textContent = 'Analyzing...';
+            for (const id of state.selected) {
+                await fetch('/v1/incidents/' + id + '/analyze', { method: 'POST' });
+            }
+            await loadIncidents(state.selectedAgent);
+            btn.disabled = false;
+            btn.textContent = 'Analyze with AI';
+        };
+
+        function showDetail(id) {
+            const i = state.incidents.find(x => x.id === id);
+            if (!i) return;
+            const body = $('modal-body');
+            body.textContent = '';
+            const addSection = (title, content, isHtml) => {
+                const section = document.createElement('div');
+                section.className = 'detail-section';
+                const h3 = document.createElement('h3');
+                h3.textContent = title;
+                const pre = document.createElement('pre');
+                pre.textContent = content || 'N/A';
+                section.appendChild(h3);
+                section.appendChild(pre);
+                body.appendChild(section);
+            };
+            addSection('Source', i.source);
+            addSection('Type', i.type);
+            addSection('Raw Error', i.raw_error);
+            if (i.ai_analysis) {
+                const section = document.createElement('div');
+                section.className = 'detail-section';
+                const analysis = document.createElement('div');
+                analysis.className = 'ai-analysis';
+                const h4 = document.createElement('h4');
+                h4.textContent = 'AI Analysis';
+                const p = document.createElement('p');
+                p.textContent = i.ai_analysis;
+                analysis.appendChild(h4);
+                analysis.appendChild(p);
+                if (i.ai_solution) {
+                    const h4s = document.createElement('h4');
+                    h4s.textContent = 'Suggested Fix';
+                    h4s.style.marginTop = '12px';
+                    const pre = document.createElement('pre');
+                    pre.style.background = '#16181c';
+                    pre.style.marginTop = '8px';
+                    pre.textContent = i.ai_solution;
+                    analysis.appendChild(h4s);
+                    analysis.appendChild(pre);
+                }
+                section.appendChild(analysis);
+                body.appendChild(section);
+            } else {
+                const section = document.createElement('div');
+                section.className = 'detail-section';
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-primary';
+                btn.textContent = 'Analyze with AI';
+                btn.onclick = () => analyzeOne(id);
+                section.appendChild(btn);
+                body.appendChild(section);
+            }
+            $('detail-modal').classList.add('active');
+        }
+
+        async function analyzeOne(id) {
+            const body = $('modal-body');
+            body.textContent = '';
+            const loading = document.createElement('div');
+            loading.className = 'loading';
+            const spinner = document.createElement('div');
+            spinner.className = 'spinner';
+            loading.appendChild(spinner);
+            loading.appendChild(document.createTextNode('Analyzing...'));
+            body.appendChild(loading);
+            await fetch('/v1/incidents/' + id + '/analyze', { method: 'POST' });
+            await loadIncidents(state.selectedAgent);
+            showDetail(id);
+        }
+
+        function closeModal() { $('detail-modal').classList.remove('active'); }
+        $('modal-close-btn').onclick = closeModal;
+        $('detail-modal').onclick = e => { if (e.target.id === 'detail-modal') closeModal(); };
+
+        loadAgents();
+        setInterval(() => {
+            loadAgents();
+            if (state.selectedAgent) loadIncidents(state.selectedAgent);
+        }, 10000);
+    </script>
+</body>
+</html>
