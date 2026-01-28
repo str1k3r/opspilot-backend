@@ -1,87 +1,125 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"log"
 	"net/http"
 	"os"
-	"strings"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jmoiron/sqlx"
-	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+
 	"opspilot-backend/internal/handlers"
+	"opspilot-backend/internal/ingest"
+	"opspilot-backend/internal/natsbus"
+	"opspilot-backend/internal/rpc"
+	"opspilot-backend/internal/services"
+	"opspilot-backend/internal/storage"
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using environment variables")
+	// Database connection (with retries)
+	var db *sqlx.DB
+	var err error
+	for i := 0; i < 10; i++ {
+		db, err = sqlx.Connect("postgres", buildDSN())
+		if err == nil {
+			break
+		}
+		log.Printf("DB connection attempt %d failed: %v", i+1, err)
+		time.Sleep(2 * time.Second)
 	}
-
-	dbHost := getEnv("DB_HOST", "localhost")
-	dbUser := getEnv("DB_USER", "ops_user")
-	dbPass := getEnv("DB_PASSWORD", "ops_pass")
-	dbName := getEnv("DB_NAME", "opspilot")
-	dbPort := getEnv("DB_PORT", "5432")
-
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPass, dbName)
-
-	db, err := sqlx.Connect("postgres", connStr)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
-
-	if err := db.Ping(); err != nil {
-		log.Fatalf("Database ping failed: %v", err)
-	}
-
 	log.Println("Connected to database")
 
-	handler := handlers.NewHandler(db)
+	// NATS connection
+	natsClient, err := natsbus.Connect()
+	if err != nil {
+		log.Fatalf("Failed to connect to NATS: %v", err)
+	}
+	defer natsClient.Close()
 
+	// Storage
+	store := storage.NewStorage(db)
+
+	// RPC client
+	rpcClient := rpc.NewClient(natsClient.NC())
+
+	// Services
+	aiClient := services.NewOpenRouterClient()
+	slackClient := services.NewSlackClient()
+
+	// Start consumers
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	eventsConsumer := ingest.NewEventsConsumer(natsClient.JS(), store)
+	if err := eventsConsumer.Start(ctx); err != nil {
+		log.Fatalf("Failed to start events consumer: %v", err)
+	}
+
+	kvWatcher := ingest.NewKVWatcher(natsClient.KV(), store)
+	if err := kvWatcher.Start(ctx); err != nil {
+		log.Fatalf("Failed to start KV watcher: %v", err)
+	}
+
+	// HTTP handlers
+	h := handlers.New(store, db, aiClient, slackClient, rpcClient)
+
+	// Router
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	h.RegisterRoutes(r)
 
-	workDir, _ := os.Getwd()
-	filesDir := http.Dir(workDir + "/static")
-	FileServer(r, "/static", filesDir)
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
+	}
 
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, workDir+"/static/index.html")
-	})
+	// Graceful shutdown
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
 
-	handler.RegisterRoutes(r)
+		log.Println("Shutting down...")
+		cancel()
 
-	log.Println("Starting server on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+
+		_ = eventsConsumer.Stop()
+		_ = kvWatcher.Stop()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+
+	log.Println("Server starting on :8080")
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatalf("Server error: %v", err)
+	}
+	log.Println("Server stopped")
 }
 
-func FileServer(r chi.Router, path string, root http.FileSystem) {
-	if strings.ContainsAny(path, "{}*") {
-		panic("FileServer does not permit any URL parameters.")
-	}
-
-	if path != "/" && path[len(path)-1] != '/' {
-		r.Get(path, http.StripPrefix(path, http.FileServer(root)).ServeHTTP)
-		return
-	}
-
-	r.Get(path+"*", func(w http.ResponseWriter, r *http.Request) {
-		rctx := chi.RouteContext(r.Context())
-		pathPrefix := strings.TrimSuffix(rctx.RoutePattern(), "/*")
-		fs := http.StripPrefix(pathPrefix, http.FileServer(root))
-		fs.ServeHTTP(w, r)
-	})
+func buildDSN() string {
+	return "host=" + getEnv("DB_HOST", "localhost") +
+		" user=" + getEnv("DB_USER", "ops_user") +
+		" password=" + getEnv("DB_PASSWORD", "ops_pass") +
+		" dbname=" + getEnv("DB_NAME", "opspilot") +
+		" sslmode=disable"
 }
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
-	return defaultValue
+	return fallback
 }

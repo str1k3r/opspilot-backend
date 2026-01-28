@@ -131,6 +131,17 @@
         .incident-status { padding: 4px 8px; border-radius: 4px; font-size: 12px; text-align: center; }
         .incident-status.new { background: #1d9bf01a; color: #1d9bf0; }
         .incident-status.analyzed { background: #00ba7c1a; color: #00ba7c; }
+        .incident-status.action_sent { background: #ffd7001a; color: #ffd700; }
+        .incident-status.critical { background: #f4212e1a; color: #f4212e; }
+        .critical-badge {
+            background: #f4212e;
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
         .btn-small { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
         .modal-overlay {
             position: fixed;
@@ -201,6 +212,15 @@
             <div id="connection-status" class="status-badge status-offline">Disconnected</div>
         </header>
         <div class="agents-bar" id="agents-bar"></div>
+        <div class="modal-overlay" id="agent-modal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2 id="agent-modal-title">Agent Discovery</h2>
+                    <button class="modal-close" id="agent-modal-close">&times;</button>
+                </div>
+                <div class="modal-body" id="agent-modal-body"></div>
+            </div>
+        </div>
         <div class="toolbar">
             <button class="btn btn-primary" id="analyze-btn" disabled>Analyze with AI</button>
             <span class="selected-count" id="selected-count">0 selected</span>
@@ -243,6 +263,52 @@
             return div.textContent;
         }
 
+        function prettyJSON(obj) {
+            try { return JSON.stringify(obj, null, 2); } catch { return String(obj || ''); }
+        }
+
+        function openAgentModal(agent) {
+            const modal = $('agent-modal');
+            const body = $('agent-modal-body');
+            const title = $('agent-modal-title');
+            title.textContent = `Agent Discovery — ${agent.hostname || 'unknown'}`;
+            body.textContent = '';
+            // Show loading
+            const loading = document.createElement('div');
+            loading.className = 'loading';
+            loading.innerHTML = '<div class="spinner"></div>Loading discovery...';
+            body.appendChild(loading);
+            // Fetch fresh agent data to get meta
+            fetch('/v1/agents').then(r => r.json()).then(list => {
+                const found = (list || []).find(x => x.id === agent.id);
+                body.textContent = '';
+                const section = document.createElement('div');
+                section.className = 'detail-section';
+                const h3 = document.createElement('h3');
+                h3.textContent = 'Discovery JSON';
+                const pre = document.createElement('pre');
+                let data = {};
+                try {
+                  if (found && found.meta) {
+                    // meta — base64 строка; декодируем и парсим JSON
+                    const jsonText = atob(found.meta);
+                    data = JSON.parse(jsonText);
+                  }
+                } catch (e) {
+                  data = { error: 'Failed to decode meta', detail: String(e) };
+                }
+                pre.textContent = prettyJSON(data);
+                section.appendChild(h3);
+                section.appendChild(pre);
+                body.appendChild(section);
+            }).catch(err => {
+                body.textContent = 'Failed to load discovery: ' + (err && err.message ? err.message : err);
+            });
+            modal.classList.add('active');
+        }
+        $('agent-modal-close').onclick = () => $('agent-modal').classList.remove('active');
+        $('agent-modal').onclick = e => { if (e.target.id === 'agent-modal') $('agent-modal').classList.remove('active'); };
+
         async function loadAgents() {
             try {
                 const res = await fetch('/v1/agents');
@@ -263,7 +329,13 @@
             state.agents.forEach(a => {
                 const chip = document.createElement('div');
                 chip.className = 'agent-chip' + (state.selectedAgent === a.id ? ' active' : '');
-                chip.onclick = () => selectAgent(a.id);
+                chip.onclick = (e) => {
+                    if (e.metaKey || e.ctrlKey) {
+                        openAgentModal(a);
+                    } else {
+                        selectAgent(a.id);
+                    }
+                };
                 const hostname = document.createElement('div');
                 hostname.className = 'hostname';
                 hostname.textContent = a.hostname || 'unknown';
@@ -347,6 +419,12 @@
                     const source = document.createElement('span');
                     source.className = 'incident-source';
                     source.textContent = i.source || 'N/A';
+                    if (i.is_critical) {
+                        const criticalBadge = document.createElement('span');
+                        criticalBadge.className = 'critical-badge';
+                        criticalBadge.textContent = 'CRITICAL';
+                        source.appendChild(criticalBadge);
+                    }
                     const typeSpan = document.createElement('span');
                     typeSpan.className = 'incident-type';
                     typeSpan.textContent = i.type;
@@ -354,8 +432,9 @@
                     time.className = 'incident-time';
                     time.textContent = new Date(i.created_at).toLocaleString();
                     const status = document.createElement('span');
-                    status.className = 'incident-status ' + (i.ai_analysis ? 'analyzed' : 'new');
-                    status.textContent = i.ai_analysis ? 'analyzed' : 'new';
+                    const statusClass = i.status === 'action_sent' ? 'action_sent' : (i.ai_analysis ? 'analyzed' : 'new');
+                    status.className = 'incident-status ' + statusClass;
+                    status.textContent = i.status === 'action_sent' ? 'action sent' : (i.ai_analysis ? 'analyzed' : 'new');
                     const actions = document.createElement('div');
                     actions.className = 'incident-actions';
                     const viewBtn = document.createElement('button');
@@ -431,6 +510,13 @@
                 section.appendChild(pre);
                 body.appendChild(section);
             };
+            // Show critical badge if applicable
+            if (i.is_critical) {
+                const critSection = document.createElement('div');
+                critSection.style.cssText = 'background:#f4212e1a;border:1px solid #f4212e33;border-radius:8px;padding:12px;margin-bottom:16px;display:flex;align-items:center;gap:8px';
+                critSection.innerHTML = '<span style="font-size:20px">🔥</span><strong style="color:#f4212e">CRITICAL INCIDENT</strong>';
+                body.appendChild(critSection);
+            }
             addSection('Source', i.source);
             addSection('Type', i.type);
             addSection('Raw Error', i.raw_error);
@@ -445,16 +531,41 @@
                 p.textContent = i.ai_analysis;
                 analysis.appendChild(h4);
                 analysis.appendChild(p);
-                if (i.ai_solution) {
-                    const h4s = document.createElement('h4');
-                    h4s.textContent = 'Suggested Fix';
-                    h4s.style.marginTop = '12px';
-                    const pre = document.createElement('pre');
-                    pre.style.background = '#16181c';
-                    pre.style.marginTop = '8px';
-                    pre.textContent = i.ai_solution;
-                    analysis.appendChild(h4s);
-                    analysis.appendChild(pre);
+                // Show execute button if there's a suggested action
+                if (i.suggested_action && i.suggested_action.cmd) {
+                    const actionDiv = document.createElement('div');
+                    actionDiv.style.marginTop = '16px';
+                    actionDiv.style.padding = '12px';
+                    actionDiv.style.background = '#1d9bf01a';
+                    actionDiv.style.border = '1px solid #1d9bf033';
+                    actionDiv.style.borderRadius = '8px';
+
+                    const actionLabel = document.createElement('div');
+                    actionLabel.style.marginBottom = '8px';
+                    actionLabel.style.color = '#1d9bf0';
+                    actionLabel.style.fontWeight = '500';
+                    actionLabel.textContent = 'Suggested Action: ' + (i.suggested_action.label || i.suggested_action.cmd);
+
+                    const actionCmd = document.createElement('pre');
+                    actionCmd.style.background = '#16181c';
+                    actionCmd.style.marginBottom = '12px';
+                    actionCmd.style.fontSize = '12px';
+                    // Format args as key=value pairs
+                    let argsStr = '';
+                    if (i.suggested_action.args) {
+                        argsStr = Object.entries(i.suggested_action.args).map(([k, v]) => `${k}=${v}`).join(' ');
+                    }
+                    actionCmd.textContent = i.suggested_action.cmd + (argsStr ? ' ' + argsStr : '');
+
+                    const executeBtn = document.createElement('button');
+                    executeBtn.className = 'btn btn-primary';
+                    executeBtn.textContent = 'Execute Action';
+                    executeBtn.onclick = () => executeAction(i.id);
+
+                    actionDiv.appendChild(actionLabel);
+                    actionDiv.appendChild(actionCmd);
+                    actionDiv.appendChild(executeBtn);
+                    analysis.appendChild(actionDiv);
                 }
                 section.appendChild(analysis);
                 body.appendChild(section);
@@ -484,6 +595,46 @@
             await fetch('/v1/incidents/' + id + '/analyze', { method: 'POST' });
             await loadIncidents(state.selectedAgent);
             showDetail(id);
+        }
+
+        async function executeAction(id) {
+            const body = $('modal-body');
+            body.textContent = '';
+            const loading = document.createElement('div');
+            loading.className = 'loading';
+            const spinner = document.createElement('div');
+            spinner.className = 'spinner';
+            loading.appendChild(spinner);
+            loading.appendChild(document.createTextNode('Executing action...'));
+            body.appendChild(loading);
+            try {
+                const res = await fetch('/v1/incidents/' + id + '/execute', { method: 'POST' });
+                const data = await res.json();
+                body.textContent = '';
+                const result = document.createElement('div');
+                result.style.padding = '20px';
+                result.style.textAlign = 'center';
+                if (res.ok) {
+                    result.innerHTML = '<div style="color:#00ba7c;font-size:48px;margin-bottom:12px">✓</div>' +
+                        '<h3 style="margin-bottom:8px">Action Sent</h3>' +
+                        '<p style="color:#71767b">Command: ' + escapeHtml(data.command) + '</p>';
+                } else {
+                    result.innerHTML = '<div style="color:#f4212e;font-size:48px;margin-bottom:12px">✗</div>' +
+                        '<h3 style="margin-bottom:8px">Failed</h3>' +
+                        '<p style="color:#71767b">' + escapeHtml(data.error || 'Unknown error') + '</p>';
+                }
+                body.appendChild(result);
+                await loadIncidents(state.selectedAgent);
+            } catch (e) {
+                body.textContent = '';
+                const result = document.createElement('div');
+                result.style.padding = '20px';
+                result.style.textAlign = 'center';
+                result.innerHTML = '<div style="color:#f4212e;font-size:48px;margin-bottom:12px">✗</div>' +
+                    '<h3 style="margin-bottom:8px">Error</h3>' +
+                    '<p style="color:#71767b">' + escapeHtml(e.message) + '</p>';
+                body.appendChild(result);
+            }
         }
 
         function closeModal() { $('detail-modal').classList.remove('active'); }

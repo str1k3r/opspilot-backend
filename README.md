@@ -82,12 +82,6 @@ CREATE TABLE incidents (
 
 ## Testing
 
-### Test WebSocket Client
-```bash
-cd opspilot-backend
-go run test_client.go
-```
-
 ### Manual Test
 ```bash
 # Connect via WebSocket (using wscat or similar)
@@ -150,6 +144,5 @@ backend/
 │   └── storage/             # Database operations
 ├── Dockerfile               # Dev container
 ├── .air.toml                # Hot reload config
-├── go.mod
-└── test_client.go           # WebSocket test client
+└── go.mod
 ```
