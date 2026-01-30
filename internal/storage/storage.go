@@ -14,6 +14,10 @@ type Storage struct {
 	db *sqlx.DB
 }
 
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
 // UpdateAgentMetaAndHostname updates meta JSON and hostname for an agent.
 func (s *Storage) UpdateAgentMetaAndHostname(agentID string, meta []byte, hostname string) error {
 	if meta == nil {
@@ -30,13 +34,23 @@ func NewStorage(db *sqlx.DB) *Storage {
 
 func (s *Storage) CreateAgent(agent *models.Agent) error {
 	query := `
-		INSERT INTO agents (id, agent_id, hostname, status, last_seen_at, meta)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO agents (
+			id, agent_id, org_id, name, hostname, status, last_seen_at, tags,
+			hardware_fingerprint, enrolled_via, enrolled_at, enrolled_ip, meta
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, '[]'::jsonb), $9, $10, $11, $12, $13)
 		ON CONFLICT (agent_id)
 		DO UPDATE SET
+			org_id = COALESCE(EXCLUDED.org_id, agents.org_id),
+			name = COALESCE(NULLIF(EXCLUDED.name, ''), agents.name),
 			hostname = EXCLUDED.hostname,
 			status = EXCLUDED.status,
 			last_seen_at = EXCLUDED.last_seen_at,
+			tags = COALESCE(EXCLUDED.tags, agents.tags),
+			hardware_fingerprint = COALESCE(NULLIF(EXCLUDED.hardware_fingerprint, ''), agents.hardware_fingerprint),
+			enrolled_via = COALESCE(EXCLUDED.enrolled_via, agents.enrolled_via),
+			enrolled_at = COALESCE(EXCLUDED.enrolled_at, agents.enrolled_at),
+			enrolled_ip = COALESCE(EXCLUDED.enrolled_ip, agents.enrolled_ip),
 			meta = EXCLUDED.meta
 	`
 
@@ -45,14 +59,54 @@ func (s *Storage) CreateAgent(agent *models.Agent) error {
 		meta = []byte("{}")
 	}
 
-	_, err := s.db.Exec(query, agent.ID, agent.AgentID, agent.Hostname, agent.Status, agent.LastSeenAt, meta)
+	var tagsJSON []byte
+	var err error
+	if agent.Tags != nil {
+		tagsJSON, err = json.Marshal(agent.Tags)
+		if err != nil {
+			return err
+		}
+	}
+
+	enrolledVia := nullIfEmpty("")
+	if agent.EnrolledVia != nil {
+		enrolledVia = nullIfEmpty(*agent.EnrolledVia)
+	}
+
+	enrolledIP := nullIfEmpty("")
+	if agent.EnrolledIP != nil {
+		enrolledIP = nullIfEmpty(*agent.EnrolledIP)
+	}
+
+	_, err = s.db.Exec(query,
+		agent.ID,
+		agent.AgentID,
+		nullIfEmpty(agent.OrgID),
+		agent.Name,
+		agent.Hostname,
+		agent.Status,
+		agent.LastSeenAt,
+		tagsJSON,
+		nullIfEmpty(agent.HardwareFingerprint),
+		enrolledVia,
+		agent.EnrolledAt,
+		enrolledIP,
+		meta,
+	)
 	return err
 }
 
 func (s *Storage) GetAgentByAgentID(agentID string) (*models.Agent, error) {
-	var agent models.Agent
-	query := `SELECT id, agent_id, hostname, status, last_seen_at, meta FROM agents WHERE agent_id = $1`
-	err := s.db.Get(&agent, query, agentID)
+	query := `
+		SELECT id, agent_id, org_id,
+		       COALESCE(name, '') AS name,
+		       COALESCE(hostname, '') AS hostname,
+		       status, last_seen_at, tags, hardware_fingerprint,
+		       enrolled_via, enrolled_at, enrolled_ip::text, meta
+		FROM agents
+		WHERE agent_id = $1
+	`
+	agent, err := scanAgentRow(s.db.QueryRow(query, agentID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -63,9 +117,16 @@ func (s *Storage) GetAgentByAgentID(agentID string) (*models.Agent, error) {
 }
 
 func (s *Storage) GetAgent(id string) (*models.Agent, error) {
-	var agent models.Agent
-	query := `SELECT id, agent_id, hostname, status, last_seen_at, meta FROM agents WHERE id = $1`
-	err := s.db.Get(&agent, query, id)
+	query := `
+		SELECT id, agent_id, org_id,
+		       COALESCE(name, '') AS name,
+		       COALESCE(hostname, '') AS hostname,
+		       status, last_seen_at, tags, hardware_fingerprint,
+		       enrolled_via, enrolled_at, enrolled_ip::text, meta
+		FROM agents
+		WHERE id = $1
+	`
+	agent, err := scanAgentRow(s.db.QueryRow(query, id))
 	if err != nil {
 		return nil, err
 	}
@@ -159,17 +220,30 @@ func (s *Storage) UpdateIncident(incident *models.Incident) error {
 
 	query := `
 		UPDATE incidents
-		SET ai_analysis = $1, is_critical = $2, suggested_action = $3, status = $4
+		SET ai_analysis = $1, is_critical = $2, suggested_action = $3::jsonb, status = $4
 		WHERE id = $5
 	`
-	_, err := s.db.Exec(query, incident.AIAnalysis, incident.IsCritical, actionJSON, incident.Status, incident.ID)
+	var suggestedAction interface{}
+	if len(actionJSON) > 0 {
+		suggestedAction = string(actionJSON)
+	} else {
+		suggestedAction = nil
+	}
+	_, err := s.db.Exec(query, incident.AIAnalysis, incident.IsCritical, suggestedAction, incident.Status, incident.ID)
 	return err
 }
 
 func (s *Storage) GetAgentByID(id string) (*models.Agent, error) {
-	var agent models.Agent
-	query := `SELECT id, agent_id, hostname, status, last_seen_at, meta FROM agents WHERE id = $1`
-	err := s.db.Get(&agent, query, id)
+	query := `
+		SELECT id, agent_id, org_id,
+		       COALESCE(name, '') AS name,
+		       COALESCE(hostname, '') AS hostname,
+		       status, last_seen_at, tags, hardware_fingerprint,
+		       enrolled_via, enrolled_at, enrolled_ip::text, meta
+		FROM agents
+		WHERE id = $1
+	`
+	agent, err := scanAgentRow(s.db.QueryRow(query, id))
 	if err != nil {
 		return nil, err
 	}
@@ -187,4 +261,54 @@ func (s *Storage) MarkStaleAgentsOffline(threshold time.Duration) error {
 
 func (s *Storage) Ping() error {
 	return s.db.Ping()
+}
+
+func scanAgentRow(scanner rowScanner) (models.Agent, error) {
+	var agent models.Agent
+	var orgID sql.NullString
+	var tagsJSON []byte
+	var hardwareFingerprint sql.NullString
+	var enrolledVia sql.NullString
+	var enrolledIP sql.NullString
+
+	err := scanner.Scan(
+		&agent.ID,
+		&agent.AgentID,
+		&orgID,
+		&agent.Name,
+		&agent.Hostname,
+		&agent.Status,
+		&agent.LastSeenAt,
+		&tagsJSON,
+		&hardwareFingerprint,
+		&enrolledVia,
+		&agent.EnrolledAt,
+		&enrolledIP,
+		&agent.Meta,
+	)
+	if err != nil {
+		return models.Agent{}, err
+	}
+
+	tags, err := decodeStringArray(tagsJSON)
+	if err != nil {
+		return models.Agent{}, err
+	}
+	agent.Tags = tags
+	if orgID.Valid {
+		agent.OrgID = orgID.String
+	}
+	agent.HardwareFingerprint = hardwareFingerprint.String
+
+	if enrolledVia.Valid {
+		value := enrolledVia.String
+		agent.EnrolledVia = &value
+	}
+
+	if enrolledIP.Valid {
+		value := enrolledIP.String
+		agent.EnrolledIP = &value
+	}
+
+	return agent, nil
 }

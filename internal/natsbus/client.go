@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nkeys"
 )
 
 type Client struct {
@@ -41,6 +43,12 @@ func Connect() (*Client, error) {
 		}),
 	}
 
+	if authOpt, err := authOption(); err != nil {
+		return nil, err
+	} else if authOpt != nil {
+		opts = append(opts, authOpt)
+	}
+
 	nc, err := nats.Connect(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("connect to NATS: %w", err)
@@ -67,6 +75,45 @@ func Connect() (*Client, error) {
 	}
 
 	return &Client{nc: nc, js: js, kv: kv}, nil
+}
+
+func authOption() (nats.Option, error) {
+	if creds := os.Getenv("NATS_BACKEND_CREDS"); creds != "" {
+		return nats.UserCredentials(creds), nil
+	}
+
+	jwtToken := strings.TrimSpace(os.Getenv("NATS_BACKEND_JWT"))
+	jwtFile := strings.TrimSpace(os.Getenv("NATS_BACKEND_JWT_FILE"))
+	seed := strings.TrimSpace(os.Getenv("NATS_BACKEND_SEED"))
+
+	if jwtToken == "" && jwtFile == "" && seed == "" {
+		return nil, nil
+	}
+
+	if jwtToken == "" && jwtFile != "" {
+		data, err := os.ReadFile(jwtFile)
+		if err != nil {
+			return nil, fmt.Errorf("read NATS_BACKEND_JWT_FILE: %w", err)
+		}
+		jwtToken = strings.TrimSpace(string(data))
+	}
+
+	if jwtToken == "" {
+		return nil, fmt.Errorf("missing NATS_BACKEND_JWT")
+	}
+	if seed == "" {
+		return nil, fmt.Errorf("missing NATS_BACKEND_SEED")
+	}
+
+	kp, err := nkeys.FromSeed([]byte(seed))
+	if err != nil {
+		return nil, fmt.Errorf("invalid NATS_BACKEND_SEED: %w", err)
+	}
+
+	return nats.UserJWT(
+		func() (string, error) { return jwtToken, nil },
+		func(nonce []byte) ([]byte, error) { return kp.Sign(nonce) },
+	), nil
 }
 
 // Close drains and closes the NATS connection.
@@ -98,8 +145,8 @@ func ensureInfrastructure(js nats.JetStreamContext) error {
 			Subjects:   []string{"ops.*.events.>"},
 			Retention:  nats.LimitsPolicy,
 			MaxAge:     72 * time.Hour,
-			MaxBytes:   10 * 1024 * 1024 * 1024, // 10GB
-			MaxMsgSize: 1 * 1024 * 1024,         // 1MB
+			MaxBytes:   10 * 1024 * 1024, // 1GB
+			MaxMsgSize: 1 * 1024 * 1024,  // 1MB
 			Discard:    nats.DiscardOld,
 			Storage:    nats.FileStorage,
 		})
@@ -116,7 +163,7 @@ func ensureInfrastructure(js nats.JetStreamContext) error {
 	if err == nats.ErrBucketNotFound {
 		_, err = js.CreateKeyValue(&nats.KeyValueConfig{
 			Bucket:       "AGENTS",
-			TTL:          30 * time.Second,
+			TTL:          2 * time.Minute,
 			MaxValueSize: 8 * 1024,
 			History:      1,
 			Storage:      nats.FileStorage,

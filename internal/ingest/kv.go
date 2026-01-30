@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"time"
 
@@ -73,8 +74,9 @@ func (w *KVWatcher) handleEntry(entry nats.KeyValueEntry) {
 		}
 
 		if hb.Inventory != nil {
-			meta, _ := msgpack.Marshal(hb)
-			agent.Meta = meta
+			if meta, err := json.Marshal(hb); err == nil {
+				agent.Meta = meta
+			}
 		}
 
 		if err := w.storage.CreateAgent(agent); err != nil {
@@ -107,7 +109,7 @@ func (w *KVWatcher) reconcileLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := w.storage.MarkStaleAgentsOffline(35 * time.Second); err != nil {
+			if err := w.storage.MarkStaleAgentsOffline(90 * time.Second); err != nil {
 				log.Printf("ERROR Reconcile error: %v", err)
 			}
 		}

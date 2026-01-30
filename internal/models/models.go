@@ -3,12 +3,19 @@ package models
 import "time"
 
 type Agent struct {
-	ID         string     `json:"id" db:"id"`
-	AgentID    string     `json:"agent_id" db:"agent_id"`
-	Hostname   string     `json:"hostname" db:"hostname"`
-	Status     string     `json:"status" db:"status"`
-	LastSeenAt *time.Time `json:"last_seen_at" db:"last_seen_at"`
-	Meta       []byte     `json:"meta" db:"meta"`
+	ID                  string     `json:"id" db:"id"`
+	AgentID             string     `json:"agent_id" db:"agent_id"`
+	OrgID               string     `json:"org_id" db:"org_id"`
+	Name                string     `json:"name" db:"name"`
+	Hostname            string     `json:"hostname" db:"hostname"`
+	Status              string     `json:"status" db:"status"`
+	Tags                []string   `json:"tags" db:"tags"`
+	HardwareFingerprint string     `json:"hardware_fingerprint" db:"hardware_fingerprint"`
+	EnrolledVia         *string    `json:"enrolled_via,omitempty" db:"enrolled_via"`
+	EnrolledAt          *time.Time `json:"enrolled_at,omitempty" db:"enrolled_at"`
+	EnrolledIP          *string    `json:"enrolled_ip,omitempty" db:"enrolled_ip"`
+	LastSeenAt          *time.Time `json:"last_seen_at" db:"last_seen_at"`
+	Meta                []byte     `json:"meta" db:"meta"`
 }
 
 type Incident struct {
