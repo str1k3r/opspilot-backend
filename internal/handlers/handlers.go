@@ -14,10 +14,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	_ "opspilot-backend/docs" // swagger docs
 	"github.com/nats-io/nats.go"
 	"github.com/swaggo/http-swagger/v2"
+	_ "opspilot-backend/docs" // swagger docs
 	"opspilot-backend/internal/auth"
+	"opspilot-backend/internal/cache"
+	rl "opspilot-backend/internal/middleware"
 	"opspilot-backend/internal/models"
 	"opspilot-backend/internal/natsauth"
 	"opspilot-backend/internal/rpc"
@@ -31,15 +33,17 @@ type Handler struct {
 	aiClient    *services.OpenRouterClient
 	slackClient *services.SlackClient
 	rpc         *rpc.Client
+	cache       cache.Client
 }
 
-func New(storage *storage.Storage, db *sqlx.DB, ai *services.OpenRouterClient, slack *services.SlackClient, rpcClient *rpc.Client) *Handler {
+func New(storage *storage.Storage, db *sqlx.DB, ai *services.OpenRouterClient, slack *services.SlackClient, rpcClient *rpc.Client, cacheClient cache.Client) *Handler {
 	return &Handler{
 		storage:     storage,
 		db:          db,
 		aiClient:    ai,
 		slackClient: slack,
 		rpc:         rpcClient,
+		cache:       cacheClient,
 	}
 }
 
@@ -82,7 +86,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Auth
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Route("/auth", func(r chi.Router) {
-			r.Post("/login", authHandler.Login)
+			r.With(rl.RateLimitLogin(h.cache)).Post("/login", authHandler.Login)
 			r.With(auth.Middleware).Post("/logout", authHandler.Logout)
 			r.With(auth.Middleware).Get("/me", authHandler.Me)
 		})
@@ -91,7 +95,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Post("/slack/interactive", h.HandleSlackInteractive)
 
 		// Public enrollment endpoint
-		r.Post("/agents/enroll", enrollmentHandler.EnrollAgent)
+		r.With(rl.RateLimitEnrollIP(h.cache), rl.RateLimitEnrollToken(h.cache)).Post("/agents/enroll", enrollmentHandler.EnrollAgent)
 
 		// Protected API
 		r.With(auth.Middleware).Group(func(r chi.Router) {
@@ -287,8 +291,6 @@ func (h *Handler) HandleAgentExec(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
-
-
 
 // AgentResponse represents an agent in the API response
 type AgentResponse struct {

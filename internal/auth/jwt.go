@@ -8,11 +8,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const (
-	cookieName   = "opspilot_token"
-	cookieMaxAge = 7 * 24 * 60 * 60
-)
-
 var errMissingSecret = errors.New("JWT_SECRET is not set")
 
 func tokenSecret() ([]byte, error) {
@@ -65,12 +60,4 @@ func ParseToken(tokenString string) (*Claims, error) {
 	}
 
 	return claims, nil
-}
-
-func CookieName() string {
-	return cookieName
-}
-
-func CookieMaxAge() int {
-	return cookieMaxAge
 }

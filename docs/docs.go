@@ -12,6 +12,14 @@ const docTemplate = `{
         "contact": {},
         "version": "{{.Version}}"
     },
+    "securityDefinitions": {
+        "bearerAuth": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "Bearer <token>"
+        }
+    },
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
@@ -19,7 +27,7 @@ const docTemplate = `{
             "get": {
                 "security": [
                     {
-                        "BearerAuth": []
+                        "bearerAuth": []
                     }
                 ],
                 "description": "Returns a list of all registered agents with their status and metadata",
@@ -51,7 +59,7 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "BearerAuth": []
+                        "bearerAuth": []
                     }
                 ],
                 "description": "Creates a new agent record in the system",
@@ -102,7 +110,7 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "BearerAuth": []
+                        "bearerAuth": []
                     }
                 ],
                 "description": "Sends a command to be executed on the specified agent",
@@ -175,7 +183,7 @@ const docTemplate = `{
             "get": {
                 "security": [
                     {
-                        "BearerAuth": []
+                        "bearerAuth": []
                     }
                 ],
                 "description": "Returns a list of incidents for the specified agent",
@@ -214,9 +222,62 @@ const docTemplate = `{
                 }
             }
         },
+        "/agents/enroll": {
+            "post": {
+                "description": "Enroll agent with bootstrap token",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Enroll agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bootstrap token",
+                        "name": "X-Bootstrap-Token",
+                        "in": "header",
+                        "required": false
+                    },
+                    {
+                        "description": "Enrollment payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
-                "description": "Authenticates user with email and password, returns JWT token in cookie",
+                "description": "Authenticates user with email and password, returns JWT token",
                 "consumes": [
                     "application/json"
                 ],
@@ -258,6 +319,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "500": {
                         "description": "Failed to generate token",
                         "schema": {
@@ -271,10 +338,10 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "BearerAuth": []
+                        "bearerAuth": []
                     }
                 ],
-                "description": "Clears the authentication cookie",
+                "description": "Logs out the user",
                 "produces": [
                     "application/json"
                 ],
@@ -299,7 +366,7 @@ const docTemplate = `{
             "get": {
                 "security": [
                     {
-                        "BearerAuth": []
+                        "bearerAuth": []
                     }
                 ],
                 "description": "Returns the currently authenticated user's information",
@@ -337,7 +404,7 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "BearerAuth": []
+                        "bearerAuth": []
                     }
                 ],
                 "description": "Performs AI analysis on an incident to determine root cause and suggest actions",
@@ -386,7 +453,7 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "BearerAuth": []
+                        "bearerAuth": []
                     }
                 ],
                 "description": "Executes the AI-suggested action for an incident via RPC to the agent",

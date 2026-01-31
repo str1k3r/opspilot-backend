@@ -7,11 +7,13 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+	"opspilot-backend/internal/cache"
 	"opspilot-backend/internal/models"
 )
 
 type Storage struct {
-	db *sqlx.DB
+	db    *sqlx.DB
+	cache cache.Client
 }
 
 type rowScanner interface {
@@ -28,8 +30,8 @@ func (s *Storage) UpdateAgentMetaAndHostname(agentID string, meta []byte, hostna
 	return err
 }
 
-func NewStorage(db *sqlx.DB) *Storage {
-	return &Storage{db: db}
+func NewStorage(db *sqlx.DB, cacheClient cache.Client) *Storage {
+	return &Storage{db: db, cache: cacheClient}
 }
 
 func (s *Storage) CreateAgent(agent *models.Agent) error {
@@ -97,6 +99,15 @@ func (s *Storage) CreateAgent(agent *models.Agent) error {
 }
 
 func (s *Storage) GetAgentByAgentID(agentID string) (*models.Agent, error) {
+	if s.cache != nil {
+		if cached, err := s.cache.Get(agentCacheKey(agentID)); err == nil && cached != "" {
+			var agent models.Agent
+			if err := json.Unmarshal([]byte(cached), &agent); err == nil {
+				return &agent, nil
+			}
+		}
+	}
+
 	query := `
 		SELECT id, agent_id, org_id,
 		       COALESCE(name, '') AS name,
@@ -113,7 +124,22 @@ func (s *Storage) GetAgentByAgentID(agentID string) (*models.Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if s.cache != nil {
+		if data, err := json.Marshal(agent); err == nil {
+			_ = s.cache.Set(agentCacheKey(agentID), string(data), 5*time.Minute)
+		}
+	}
 	return &agent, nil
+}
+
+func (s *Storage) ListAgentIDs() ([]string, error) {
+	ids := make([]string, 0)
+	query := `SELECT agent_id FROM agents`
+	if err := s.db.Select(&ids, query); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 func (s *Storage) GetAgent(id string) (*models.Agent, error) {
@@ -139,6 +165,24 @@ func (s *Storage) UpdateAgentStatus(agentID, status string) error {
 	return err
 }
 
+func (s *Storage) MarkAgentOffline(agentID string, lastSeen time.Time) error {
+	query := `UPDATE agents SET status = 'offline', last_seen_at = $2 WHERE agent_id = $1`
+	_, err := s.db.Exec(query, agentID, lastSeen)
+	if s.cache != nil {
+		_ = s.cache.Del(agentCacheKey(agentID))
+	}
+	return err
+}
+
+func (s *Storage) MarkAgentOnline(agentID string, at time.Time) error {
+	query := `UPDATE agents SET status = 'online', last_seen_at = $2 WHERE agent_id = $1`
+	_, err := s.db.Exec(query, agentID, at)
+	if s.cache != nil {
+		_ = s.cache.Del(agentCacheKey(agentID))
+	}
+	return err
+}
+
 func (s *Storage) CreateIncident(incident *models.Incident) error {
 	contextJSON := incident.ContextJSON
 	if contextJSON == nil && incident.Context != nil {
@@ -154,6 +198,20 @@ func (s *Storage) CreateIncident(incident *models.Incident) error {
 		incident.RawError, contextJSON, incident.AIAnalysis, incident.Status).
 		Scan(&incident.ID, &incident.CreatedAt)
 	return err
+}
+
+func (s *Storage) InsertInventorySnapshot(agentID, hash string, payload []byte) error {
+	query := `
+		INSERT INTO agents_inventory (agent_id, hash, payload)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (agent_id, hash) DO NOTHING
+	`
+	_, err := s.db.Exec(query, agentID, hash, payload)
+	return err
+}
+
+func agentCacheKey(agentID string) string {
+	return "ops:agent:by_id:" + agentID
 }
 
 func (s *Storage) GetIncidents(agentID string, limit int) ([]models.Incident, error) {

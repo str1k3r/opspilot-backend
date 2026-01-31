@@ -1,7 +1,7 @@
 package models
 
-// EventV3 is the wire format for JetStream events from agents.
-type EventV3 struct {
+// Event is the wire format for JetStream events from agents.
+type Event struct {
 	V         int                    `msgpack:"v"`
 	TS        int64                  `msgpack:"ts"`
 	AgentID   string                 `msgpack:"agent_id"`
@@ -11,26 +11,26 @@ type EventV3 struct {
 	Truncated bool                   `msgpack:"truncated"`
 }
 
-// HeartbeatV3 is the wire format for KV heartbeat entries.
-type HeartbeatV3 struct {
-	V              int          `msgpack:"v"`
-	AgentID        string       `msgpack:"agent_id"`
-	AgentVersion   string       `msgpack:"agent_version"`
-	Hostname       string       `msgpack:"hostname"`
-	OS             string       `msgpack:"os"`
-	Arch           string       `msgpack:"arch"`
-	Uptime         int64        `msgpack:"uptime"`
-	ConnectedSince int64        `msgpack:"connected_since"`
-	Capabilities   []string     `msgpack:"capabilities"`
-	CPUPercent     float64      `msgpack:"cpu_percent"`
-	MemPercent     float64      `msgpack:"mem_percent"`
-	Watchers       int          `msgpack:"watchers"`
-	Actions        []string     `msgpack:"actions"`
-	Inventory      *InventoryV3 `msgpack:"inventory,omitempty"`
+// Heartbeat is the wire format for KV heartbeat entries.
+type Heartbeat struct {
+	V              int        `msgpack:"v"`
+	AgentID        string     `msgpack:"agent_id"`
+	AgentVersion   string     `msgpack:"agent_version"`
+	Hostname       string     `msgpack:"hostname"`
+	OS             string     `msgpack:"os"`
+	Arch           string     `msgpack:"arch"`
+	Uptime         int64      `msgpack:"uptime"`
+	ConnectedSince int64      `msgpack:"connected_since"`
+	Capabilities   []string   `msgpack:"capabilities"`
+	CPUPercent     float64    `msgpack:"cpu_percent"`
+	MemPercent     float64    `msgpack:"mem_percent"`
+	Watchers       int        `msgpack:"watchers"`
+	Actions        []string   `msgpack:"actions"`
+	Inventory      *Inventory `msgpack:"inventory,omitempty"`
 }
 
-// InventoryV3 is the discovery data sent on first heartbeat.
-type InventoryV3 struct {
+// Inventory is the discovery data sent on first heartbeat.
+type Inventory struct {
 	Platform        string             `msgpack:"platform"`
 	PlatformVersion string             `msgpack:"platform_version"`
 	KernelVersion   string             `msgpack:"kernel_version"`
@@ -78,7 +78,7 @@ type ActionResponseV3 struct {
 }
 
 // Helper method to extract source from event details (same logic as v2).
-func (e *EventV3) GetSource() string {
+func (e *Event) GetSource() string {
 	for _, key := range []string{"source", "container_name", "service", "path"} {
 		if v, ok := e.Details[key]; ok {
 			if s, ok := v.(string); ok && s != "" {
@@ -90,7 +90,7 @@ func (e *EventV3) GetSource() string {
 }
 
 // GetLogs extracts logs from event details.
-func (e *EventV3) GetLogs() string {
+func (e *Event) GetLogs() string {
 	if v, ok := e.Details["logs"]; ok {
 		if s, ok := v.(string); ok {
 			return s

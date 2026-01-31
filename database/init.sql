@@ -76,6 +76,14 @@ CREATE TABLE IF NOT EXISTS incidents (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS agents_inventory (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+    hash TEXT NOT NULL,
+    payload JSONB NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug);
 CREATE INDEX IF NOT EXISTS idx_bootstrap_tokens_active ON bootstrap_tokens(org_id, revoked_at) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_bootstrap_tokens_prefix ON bootstrap_tokens(token_prefix);
@@ -90,6 +98,10 @@ CREATE INDEX IF NOT EXISTS idx_agent_creds_active ON agent_credentials(agent_id,
 CREATE UNIQUE INDEX IF NOT EXISTS idx_one_pinned_credential
     ON agent_credentials(agent_id)
     WHERE is_pinned = true AND revoked_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_inventory_unique
+    ON agents_inventory(agent_id, hash);
+CREATE INDEX IF NOT EXISTS idx_agents_inventory_agent_ts
+    ON agents_inventory(agent_id, ts DESC);
 
 CREATE TABLE IF NOT EXISTS agent_connections (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

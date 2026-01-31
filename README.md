@@ -4,10 +4,13 @@ Go backend for the OpsPilot monitoring platform.
 
 ## Architecture
 
-- **Transport**: NATS (JetStream for events, KV for heartbeats, Request-Reply for actions)
-- **Storage**: PostgreSQL (agents + incidents)
+- **Transport**: NATS (JetStream for events & inventory, KV for heartbeats, Request-Reply for actions)
+- **Storage**: PostgreSQL (agents, incidents, inventory history)
+- **Cache**: Redis (agent presence + rate limits + cache)
 - **AI**: OpenRouter (analysis) — optional
 - **Slack**: Stubbed (disabled for now)
+
+Protocol details are documented in `opspilot-agent/PROTOCOL.md`.
 
 ## Prerequisites
 
@@ -24,7 +27,7 @@ docker-compose up --build
 2) Verify services:
 ```bash
 curl http://localhost:8222/healthz    # NATS monitor
-curl http://localhost:8080/v1/agents  # Backend API
+curl http://localhost:8080/api/v1/agents  # Backend API
 ```
 
 3) Reset DB schema:
@@ -41,23 +44,40 @@ Set in `.env` or Docker environment:
 ```
 OPENROUTER_KEY=sk-or-...
 NATS_URL=nats://nats:4222
+NATS_URLS=nats://nats:4222
 DB_HOST=postgres
 DB_USER=ops_user
 DB_PASSWORD=ops_pass
 DB_NAME=opspilot
+REDIS_URL=redis://redis:6379/0
+JWT_SECRET=change_me
 ```
+
+Redis keyspace notifications are required for online/offline transitions:
+```
+notify-keyspace-events Ex
+```
+If disabled, the backend uses a fallback reconciler.
 
 ## API Endpoints
 
-- `GET /v1/agents` — list agents
-- `GET /v1/agents/{id}/incidents` — list incidents for an agent
-- `POST /v1/admin/exec` — execute action on agent (RPC)
-- `POST /v1/incidents/{id}/analyze` — run AI analysis
-- `POST /v1/incidents/{id}/execute` — execute suggested action
+- `POST /api/v1/auth/login` — login (Bearer token)
+- `GET /api/v1/auth/me` — current user
+- `POST /api/v1/agents/enroll` — enroll agent (bootstrap token)
+- `GET /api/v1/agents` — list agents
+- `GET /api/v1/agents/{id}/incidents` — list incidents for an agent
+- `POST /api/v1/agents/{id}/execute` — execute action on agent (RPC)
+- `POST /api/v1/incidents/{id}/analyze` — run AI analysis
+- `POST /api/v1/incidents/{id}/execute` — execute suggested action
+
+### Auth (Bearer)
+```
+Authorization: Bearer <jwt>
+```
 
 ### Exec example
 ```bash
-curl -X POST http://localhost:8080/v1/admin/exec \
+curl -X POST http://localhost:8080/api/v1/agents/{id}/execute \
   -H "Content-Type: application/json" \
   -d '{"agent_id":"a1b2c3d4e5f6","command":"restart_service","params":{"service":"nginx"}}'
 ```
@@ -67,6 +87,7 @@ If the agent is offline, the endpoint returns `404`.
 ## NATS Channels
 
 - **Events** (JetStream): `ops.{agent_id}.events.*`
+- **Inventory** (JetStream): `ops.{agent_id}.inventory`
 - **Heartbeats** (KV bucket): `AGENTS` key `{agent_id}`
 - **Actions** (RPC): `ops.{agent_id}.rpc`
 
@@ -97,14 +118,23 @@ CREATE TABLE IF NOT EXISTS incidents (
     status VARCHAR(20) DEFAULT 'new',
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS agents_inventory (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+    hash TEXT NOT NULL,
+    payload JSONB NOT NULL
+);
 ```
 
 ## Logging
 
 Key runtime logs:
 - Connected to NATS, stream/KV creation
-- Events consumer started / KV watcher started
-- Agent heartbeat / Agent offline
+- Events consumer started / Inventory consumer started / KV watcher started
+- Redis keyevent worker / fallback reconciler
+- Agent heartbeat cached / Agent offline transitions
 - Incident created
 
 ## Project Structure
@@ -113,13 +143,16 @@ Key runtime logs:
 opspilot-backend/
 ├── cmd/server/              # Entry point
 ├── internal/
+│   ├── cache/               # Redis helpers
 │   ├── handlers/            # HTTP handlers (REST + RPC exec)
-│   ├── ingest/              # JetStream consumer + KV watcher
-│   ├── models/              # DB + v3 wire models
+│   ├── ingest/              # JetStream consumers + KV watcher
+│   ├── middleware/          # HTTP middleware (rate limiting)
+│   ├── models/              # DB + wire models
 │   ├── natsbus/             # NATS connection + infra init
 │   ├── rpc/                 # Request-Reply client
 │   ├── services/            # AI + Slack (stub)
-│   └── storage/             # DB operations
+│   ├── storage/             # DB operations
+│   └── workers/             # Redis keyevents + fallback reconciler
 ├── Dockerfile
 ├── .air.toml
 └── go.mod

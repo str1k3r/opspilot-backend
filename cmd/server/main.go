@@ -14,15 +14,24 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 
+	"opspilot-backend/internal/cache"
 	"opspilot-backend/internal/handlers"
 	"opspilot-backend/internal/ingest"
 	"opspilot-backend/internal/natsbus"
 	"opspilot-backend/internal/rpc"
 	"opspilot-backend/internal/services"
 	"opspilot-backend/internal/storage"
+	"opspilot-backend/internal/workers"
 )
 
 func main() {
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatal("JWT_SECRET is required")
+	}
+	if os.Getenv("REDIS_URL") == "" {
+		log.Fatal("REDIS_URL is required")
+	}
+
 	// Database connection (with retries)
 	var db *sqlx.DB
 	var err error
@@ -47,8 +56,15 @@ func main() {
 	}
 	defer natsClient.Close()
 
+	// Redis cache
+	redisClient, err := cache.NewRedisClient()
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	defer redisClient.Close()
+
 	// Storage
-	store := storage.NewStorage(db)
+	store := storage.NewStorage(db, redisClient)
 
 	// RPC client
 	rpcClient := rpc.NewClient(natsClient.NC())
@@ -66,13 +82,24 @@ func main() {
 		log.Fatalf("Failed to start events consumer: %v", err)
 	}
 
-	kvWatcher := ingest.NewKVWatcher(natsClient.KV(), store)
+	inventoryConsumer := ingest.NewInventoryConsumer(natsClient.JS(), store)
+	if err := inventoryConsumer.Start(ctx); err != nil {
+		log.Fatalf("Failed to start inventory consumer: %v", err)
+	}
+
+	kvWatcher := ingest.NewKVWatcher(natsClient.KV(), store, redisClient)
 	if err := kvWatcher.Start(ctx); err != nil {
 		log.Fatalf("Failed to start KV watcher: %v", err)
 	}
 
+	keyEventsActive := workers.StartRedisKeyeventWorker(ctx, redisClient, store)
+	if !keyEventsActive {
+		log.Println("WARN Redis keyspace notifications are not active; fallback reconciler will be used")
+		workers.StartHeartbeatReconciler(ctx, redisClient, store)
+	}
+
 	// HTTP handlers
-	h := handlers.New(store, db, aiClient, slackClient, rpcClient)
+	h := handlers.New(store, db, aiClient, slackClient, rpcClient, redisClient)
 
 	// Router
 	r := chi.NewRouter()
@@ -98,6 +125,7 @@ func main() {
 		defer shutdownCancel()
 
 		_ = eventsConsumer.Stop()
+		_ = inventoryConsumer.Stop()
 		_ = kvWatcher.Stop()
 		_ = server.Shutdown(shutdownCtx)
 	}()

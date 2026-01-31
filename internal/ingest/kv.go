@@ -2,14 +2,13 @@ package ingest
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/vmihailenco/msgpack/v5"
 
+	"opspilot-backend/internal/cache"
 	"opspilot-backend/internal/models"
 	"opspilot-backend/internal/storage"
 )
@@ -17,11 +16,12 @@ import (
 type KVWatcher struct {
 	kv      nats.KeyValue
 	storage *storage.Storage
+	cache   cache.Client
 	watcher nats.KeyWatcher
 }
 
-func NewKVWatcher(kv nats.KeyValue, storage *storage.Storage) *KVWatcher {
-	return &KVWatcher{kv: kv, storage: storage}
+func NewKVWatcher(kv nats.KeyValue, storage *storage.Storage, cache cache.Client) *KVWatcher {
+	return &KVWatcher{kv: kv, storage: storage, cache: cache}
 }
 
 // Start begins watching the AGENTS KV bucket.
@@ -33,7 +33,6 @@ func (w *KVWatcher) Start(ctx context.Context) error {
 	w.watcher = watcher
 
 	go w.watchLoop(ctx)
-	go w.reconcileLoop(ctx)
 
 	log.Println("INFO KV watcher started")
 	return nil
@@ -58,32 +57,22 @@ func (w *KVWatcher) handleEntry(entry nats.KeyValueEntry) {
 
 	switch entry.Operation() {
 	case nats.KeyValuePut:
-		var hb models.HeartbeatV3
+		var hb models.Heartbeat
 		if err := msgpack.Unmarshal(entry.Value(), &hb); err != nil {
 			log.Printf("ERROR KV unmarshal error for %s: %v", agentID, err)
 			return
 		}
 
-		now := time.Now()
-		agent := &models.Agent{
-			ID:         uuid.New().String(),
-			AgentID:    agentID,
-			Hostname:   hb.Hostname,
-			Status:     "online",
-			LastSeenAt: &now,
-		}
-
-		if hb.Inventory != nil {
-			if meta, err := json.Marshal(hb); err == nil {
-				agent.Meta = meta
-			}
-		}
-
-		if err := w.storage.CreateAgent(agent); err != nil {
-			log.Printf("ERROR KV upsert agent error: %v", err)
+		now := time.Now().UnixMilli()
+		if err := w.cache.SetLastSeen(agentID, now, 150); err != nil {
+			log.Printf("ERROR KV last_seen cache error: %v", err)
 			return
 		}
-
+		if status, err := w.cache.GetStatus(agentID); err == nil && status == "offline" {
+			if err := w.cache.SetStatus(agentID, "online"); err != nil {
+				log.Printf("WARN KV status update error: %v", err)
+			}
+		}
 		log.Printf("INFO Agent heartbeat: %s (%s) cpu=%.1f%% mem=%.1f%%",
 			agentID, hb.Hostname, hb.CPUPercent, hb.MemPercent)
 
@@ -96,23 +85,6 @@ func (w *KVWatcher) handleEntry(entry nats.KeyValueEntry) {
 
 	case nats.KeyValuePurge:
 		log.Printf("INFO Agent purged: %s", agentID)
-	}
-}
-
-// reconcileLoop periodically marks stale agents as offline (TTL fallback).
-func (w *KVWatcher) reconcileLoop(ctx context.Context) {
-	ticker := time.NewTicker(60 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := w.storage.MarkStaleAgentsOffline(90 * time.Second); err != nil {
-				log.Printf("ERROR Reconcile error: %v", err)
-			}
-		}
 	}
 }
 

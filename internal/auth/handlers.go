@@ -3,8 +3,6 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
-	"os"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	"golang.org/x/crypto/bcrypt"
@@ -27,7 +25,7 @@ type loginRequest struct {
 
 // Login authenticates a user and returns a JWT token
 // @Summary User login
-// @Description Authenticates user with email and password, returns JWT token in cookie
+// @Description Authenticates user with email and password, returns JWT token
 // @Tags auth
 // @Accept json
 // @Produce json
@@ -67,10 +65,9 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setAuthCookie(w, token)
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
+		"token": token,
 		"user": map[string]any{
 			"id":         user.ID,
 			"email":      user.Email,
@@ -88,7 +85,6 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 // @Security BearerAuth
 // @Router /auth/logout [post]
 func (h *Handler) Logout(w http.ResponseWriter, _ *http.Request) {
-	clearAuthCookie(w)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
@@ -125,39 +121,4 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 			"created_at": user.CreatedAt,
 		},
 	})
-}
-
-func setAuthCookie(w http.ResponseWriter, value string) {
-	secure := isProduction()
-	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    value,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   CookieMaxAge(),
-		Expires:  time.Now().Add(7 * 24 * time.Hour),
-	})
-}
-
-func clearAuthCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   isProduction(),
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   -1,
-		Expires:  time.Now().Add(-1 * time.Hour),
-	})
-}
-
-func isProduction() bool {
-	env := os.Getenv("APP_ENV")
-	if env == "" {
-		env = os.Getenv("ENV")
-	}
-	return env == "production"
 }
