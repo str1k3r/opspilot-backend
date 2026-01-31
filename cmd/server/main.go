@@ -14,6 +14,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 
+	"opspilot-backend/internal/cache"
 	"opspilot-backend/internal/handlers"
 	"opspilot-backend/internal/ingest"
 	"opspilot-backend/internal/natsbus"
@@ -50,6 +51,13 @@ func main() {
 	// Storage
 	store := storage.NewStorage(db)
 
+	// Redis cache
+	redisClient, err := cache.NewRedisClient()
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	defer redisClient.Close()
+
 	// RPC client
 	rpcClient := rpc.NewClient(natsClient.NC())
 
@@ -71,7 +79,7 @@ func main() {
 		log.Fatalf("Failed to start inventory consumer: %v", err)
 	}
 
-	kvWatcher := ingest.NewKVWatcher(natsClient.KV(), store)
+	kvWatcher := ingest.NewKVWatcher(natsClient.KV(), store, redisClient)
 	if err := kvWatcher.Start(ctx); err != nil {
 		log.Fatalf("Failed to start KV watcher: %v", err)
 	}
