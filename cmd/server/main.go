@@ -96,7 +96,7 @@ func main() {
 	}
 
 	// HTTP handlers
-	h := handlers.New(store, db, aiClient, slackClient, rpcClient)
+	h := handlers.New(store, db, aiClient, slackClient, rpcClient, redisClient)
 
 	// Router
 	r := chi.NewRouter()
