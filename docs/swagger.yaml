@@ -230,6 +230,36 @@ paths:
       summary: List agent incidents
       tags:
       - agents
+  /agents/{id}/inventory:
+    get:
+      description: Returns the latest inventory snapshot for the specified agent
+      parameters:
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Inventory not found
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      security:
+      - bearerAuth: []
+      summary: Get latest agent inventory
+      tags:
+      - agents
   /agents/enroll:
     post:
       consumes:
