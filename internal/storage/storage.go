@@ -139,6 +139,18 @@ func (s *Storage) UpdateAgentStatus(agentID, status string) error {
 	return err
 }
 
+func (s *Storage) MarkAgentOffline(agentID string, lastSeen time.Time) error {
+	query := `UPDATE agents SET status = 'offline', last_seen_at = $2 WHERE agent_id = $1`
+	_, err := s.db.Exec(query, agentID, lastSeen)
+	return err
+}
+
+func (s *Storage) MarkAgentOnline(agentID string, at time.Time) error {
+	query := `UPDATE agents SET status = 'online', last_seen_at = $2 WHERE agent_id = $1`
+	_, err := s.db.Exec(query, agentID, at)
+	return err
+}
+
 func (s *Storage) CreateIncident(incident *models.Incident) error {
 	contextJSON := incident.ContextJSON
 	if contextJSON == nil && incident.Context != nil {
