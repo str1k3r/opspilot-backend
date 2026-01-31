@@ -15,6 +15,7 @@ type Client interface {
 	GetLastSeen(agentID string) (int64, error)
 	SetStatus(agentID string, status string) error
 	GetStatus(agentID string) (string, error)
+	SubscribeExpired() (*redis.PubSub, error)
 	Close() error
 }
 
@@ -84,6 +85,19 @@ func (c *RedisCache) GetStatus(agentID string) (string, error) {
 
 	key := fmt.Sprintf("ops:agent:status:%s", agentID)
 	return c.rdb.Get(ctx, key).Result()
+}
+
+func (c *RedisCache) SubscribeExpired() (*redis.PubSub, error) {
+	channel := fmt.Sprintf("__keyevent@%d__:expired", c.rdb.Options().DB)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	pubsub := c.rdb.Subscribe(ctx, channel)
+	if _, err := pubsub.Receive(ctx); err != nil {
+		_ = pubsub.Close()
+		return nil, err
+	}
+	return pubsub, nil
 }
 
 func (c *RedisCache) Close() error {

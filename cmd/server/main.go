@@ -21,6 +21,7 @@ import (
 	"opspilot-backend/internal/rpc"
 	"opspilot-backend/internal/services"
 	"opspilot-backend/internal/storage"
+	"opspilot-backend/internal/workers"
 )
 
 func main() {
@@ -82,6 +83,11 @@ func main() {
 	kvWatcher := ingest.NewKVWatcher(natsClient.KV(), store, redisClient)
 	if err := kvWatcher.Start(ctx); err != nil {
 		log.Fatalf("Failed to start KV watcher: %v", err)
+	}
+
+	keyEventsActive := workers.StartRedisKeyeventWorker(ctx, redisClient, store)
+	if !keyEventsActive {
+		log.Println("WARN Redis keyspace notifications are not active; fallback reconciler will be used")
 	}
 
 	// HTTP handlers
