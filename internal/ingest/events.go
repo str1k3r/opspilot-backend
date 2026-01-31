@@ -46,6 +46,12 @@ func (c *EventsConsumer) Start(ctx context.Context) error {
 }
 
 func (c *EventsConsumer) consumeLoop(ctx context.Context) {
+	fetchSize := 64
+	minFetch := 8
+	maxFetch := 512
+	fullCount := 0
+	emptyCount := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -53,12 +59,49 @@ func (c *EventsConsumer) consumeLoop(ctx context.Context) {
 		default:
 		}
 
-		msgs, err := c.sub.Fetch(10, nats.MaxWait(5*time.Second))
+		msgs, err := c.sub.Fetch(fetchSize, nats.MaxWait(5*time.Second))
 		if err != nil {
 			if err != nats.ErrTimeout {
 				log.Printf("WARN Fetch error: %v", err)
 			}
+			emptyCount++
+			fullCount = 0
+			if emptyCount >= 3 && fetchSize > minFetch {
+				fetchSize /= 2
+				if fetchSize < minFetch {
+					fetchSize = minFetch
+				}
+				emptyCount = 0
+			}
 			continue
+		}
+
+		if len(msgs) == 0 {
+			emptyCount++
+			fullCount = 0
+			if emptyCount >= 3 && fetchSize > minFetch {
+				fetchSize /= 2
+				if fetchSize < minFetch {
+					fetchSize = minFetch
+				}
+				emptyCount = 0
+			}
+			continue
+		}
+
+		if len(msgs) == fetchSize {
+			fullCount++
+			emptyCount = 0
+			if fullCount >= 3 && fetchSize < maxFetch {
+				fetchSize *= 2
+				if fetchSize > maxFetch {
+					fetchSize = maxFetch
+				}
+				fullCount = 0
+			}
+		} else {
+			fullCount = 0
+			emptyCount = 0
 		}
 
 		for _, msg := range msgs {
