@@ -355,12 +355,11 @@ func (h *Handler) GetAgents(w http.ResponseWriter, r *http.Request) {
 	agents := make([]agentResponse, 0, len(rows))
 	for _, row := range rows {
 		resp := agentResponse{
-			ID:         row.ID,
-			AgentID:    row.AgentID,
-			Name:       row.Name,
-			Hostname:   row.Hostname,
-			Status:     row.Status,
-			LastSeenAt: row.LastSeenAt,
+			ID:       row.ID,
+			AgentID:  row.AgentID,
+			Name:     row.Name,
+			Hostname: row.Hostname,
+			// Status and LastSeenAt will be determined from Redis or fallback to DB
 		}
 		if row.OrgID != nil {
 			resp.OrgID = *row.OrgID
@@ -368,6 +367,22 @@ func (h *Handler) GetAgents(w http.ResponseWriter, r *http.Request) {
 		if len(row.Meta) > 0 {
 			resp.Meta = base64.StdEncoding.EncodeToString(row.Meta)
 		}
+
+		// Check Redis for real-time status
+		// If agent has active heartbeat in Redis, it's online
+		// If Redis key expired, agent is offline (use DB value as fallback)
+		lastSeenMs, err := h.cache.GetLastSeen(row.AgentID)
+		if err == nil && lastSeenMs > 0 {
+			// Agent has active heartbeat in Redis -> online
+			resp.Status = "online"
+			lastSeen := time.UnixMilli(lastSeenMs)
+			resp.LastSeenAt = &lastSeen
+		} else {
+			// Redis expired or error -> use DB values (offline)
+			resp.Status = row.Status
+			resp.LastSeenAt = row.LastSeenAt
+		}
+
 		agents = append(agents, resp)
 	}
 
