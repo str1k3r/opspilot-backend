@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -120,6 +121,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Get("/agents/{id}/credentials", credsHandler.ListCredentials)
 			r.Post("/agents/{id}/rotate-credentials", credsHandler.RotateCredentials)
 			r.Get("/agents/{id}/incidents", h.GetIncidents)
+			r.Get("/agents/{id}/inventory", h.GetLatestInventory)
 
 			// Incidents
 			r.Post("/incidents/{id}/analyze", h.AnalyzeIncident)
@@ -425,6 +427,42 @@ func (h *Handler) GetIncidents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(incidents)
+}
+
+// GetLatestInventory returns the most recent inventory snapshot for an agent.
+// @Summary Get latest agent inventory
+// @Description Returns the latest inventory snapshot for the specified agent
+// @Tags agents
+// @Produce json
+// @Param id path string true "Agent ID"
+// @Success 200 {object} map[string]interface{}
+// @Failure 404 {string} string "Inventory not found"
+// @Failure 500 {string} string "Internal server error"
+// @Security bearerAuth
+// @Router /agents/{id}/inventory [get]
+func (h *Handler) GetLatestInventory(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	if agentID == "" {
+		http.Error(w, "Missing agent id", http.StatusBadRequest)
+		return
+	}
+
+	ts, payload, err := h.storage.GetLatestInventory(agentID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "Inventory not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"agent_id": agentID,
+		"ts":       ts,
+		"payload":  json.RawMessage(payload),
+	})
 }
 
 func (h *Handler) HandleSlackInteractive(w http.ResponseWriter, r *http.Request) {

@@ -244,6 +244,22 @@ func (s *Storage) GetIncidents(agentID string, limit int) ([]models.Incident, er
 	return incidents, nil
 }
 
+func (s *Storage) GetLatestInventory(agentID string) (time.Time, []byte, error) {
+	query := `
+		SELECT ts, payload
+		FROM agents_inventory
+		WHERE agent_id = $1
+		ORDER BY ts DESC
+		LIMIT 1
+	`
+	var ts time.Time
+	var payload []byte
+	if err := s.db.QueryRow(query, agentID).Scan(&ts, &payload); err != nil {
+		return time.Time{}, nil, err
+	}
+	return ts, payload, nil
+}
+
 func (s *Storage) GetIncidentByID(id string) (*models.Incident, error) {
 	var incident models.Incident
 	query := `
