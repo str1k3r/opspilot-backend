@@ -88,6 +88,7 @@ func main() {
 	keyEventsActive := workers.StartRedisKeyeventWorker(ctx, redisClient, store)
 	if !keyEventsActive {
 		log.Println("WARN Redis keyspace notifications are not active; fallback reconciler will be used")
+		workers.StartHeartbeatReconciler(ctx, redisClient, store)
 	}
 
 	// HTTP handlers

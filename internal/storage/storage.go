@@ -116,6 +116,15 @@ func (s *Storage) GetAgentByAgentID(agentID string) (*models.Agent, error) {
 	return &agent, nil
 }
 
+func (s *Storage) ListAgentIDs() ([]string, error) {
+	ids := make([]string, 0)
+	query := `SELECT agent_id FROM agents`
+	if err := s.db.Select(&ids, query); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 func (s *Storage) GetAgent(id string) (*models.Agent, error) {
 	query := `
 		SELECT id, agent_id, org_id,
