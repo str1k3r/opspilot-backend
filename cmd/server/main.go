@@ -53,15 +53,15 @@ func main() {
 	}
 	defer natsClient.Close()
 
-	// Storage
-	store := storage.NewStorage(db)
-
 	// Redis cache
 	redisClient, err := cache.NewRedisClient()
 	if err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
 	defer redisClient.Close()
+
+	// Storage
+	store := storage.NewStorage(db, redisClient)
 
 	// RPC client
 	rpcClient := rpc.NewClient(natsClient.NC())

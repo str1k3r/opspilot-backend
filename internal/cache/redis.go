@@ -17,6 +17,9 @@ type Client interface {
 	GetStatus(agentID string) (string, error)
 	SubscribeExpired() (*redis.PubSub, error)
 	IncrWithTTL(key string, ttl time.Duration) (int64, error)
+	Get(key string) (string, error)
+	Set(key string, value string, ttl time.Duration) error
+	Del(key string) error
 	Close() error
 }
 
@@ -113,6 +116,27 @@ func (c *RedisCache) IncrWithTTL(key string, ttl time.Duration) (int64, error) {
 		_ = c.rdb.Expire(ctx, key, ttl).Err()
 	}
 	return val, nil
+}
+
+func (c *RedisCache) Get(key string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	return c.rdb.Get(ctx, key).Result()
+}
+
+func (c *RedisCache) Set(key string, value string, ttl time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	return c.rdb.Set(ctx, key, value, ttl).Err()
+}
+
+func (c *RedisCache) Del(key string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	return c.rdb.Del(ctx, key).Err()
 }
 
 func (c *RedisCache) Close() error {
