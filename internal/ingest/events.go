@@ -73,7 +73,7 @@ func (c *EventsConsumer) consumeLoop(ctx context.Context) {
 }
 
 func (c *EventsConsumer) processMessage(msg *nats.Msg) error {
-	var event models.EventV3
+	var event models.Event
 	if err := msgpack.Unmarshal(msg.Data, &event); err != nil {
 		log.Printf("ERROR Unmarshal error (terminating): %v", err)
 		msg.Term()

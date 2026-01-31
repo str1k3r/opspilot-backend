@@ -58,7 +58,7 @@ func (w *KVWatcher) handleEntry(entry nats.KeyValueEntry) {
 
 	switch entry.Operation() {
 	case nats.KeyValuePut:
-		var hb models.HeartbeatV3
+		var hb models.Heartbeat
 		if err := msgpack.Unmarshal(entry.Value(), &hb); err != nil {
 			log.Printf("ERROR KV unmarshal error for %s: %v", agentID, err)
 			return
