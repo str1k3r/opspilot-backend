@@ -158,6 +158,24 @@ func ensureInfrastructure(js nats.JetStreamContext) error {
 		return fmt.Errorf("get stream info: %w", err)
 	}
 
+	// Create OPS_INVENTORY stream if not exists
+	_, err = js.StreamInfo("OPS_INVENTORY")
+	if err == nats.ErrStreamNotFound {
+		_, err = js.AddStream(&nats.StreamConfig{
+			Name:      "OPS_INVENTORY",
+			Subjects:  []string{"ops.*.inventory"},
+			Retention: nats.LimitsPolicy,
+			MaxAge:    30 * 24 * time.Hour,
+			Storage:   nats.FileStorage,
+		})
+		if err != nil {
+			return fmt.Errorf("create stream OPS_INVENTORY: %w", err)
+		}
+		log.Println("INFO Created JetStream stream OPS_INVENTORY")
+	} else if err != nil {
+		return fmt.Errorf("get stream info: %w", err)
+	}
+
 	// Create AGENTS KV bucket if not exists
 	_, err = js.KeyValue("AGENTS")
 	if err == nats.ErrBucketNotFound {
