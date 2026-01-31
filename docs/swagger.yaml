@@ -95,6 +95,12 @@ definitions:
       label:
         type: string
     type: object
+securityDefinitions:
+  bearerAuth:
+    type: apiKey
+    name: Authorization
+    in: header
+    description: 'Bearer <token>'
 info:
   contact: {}
 paths:
@@ -115,7 +121,7 @@ paths:
           schema:
             type: string
       security:
-      - BearerAuth: []
+      - bearerAuth: []
       summary: List all agents
       tags:
       - agents
@@ -146,7 +152,7 @@ paths:
           schema:
             type: string
       security:
-      - BearerAuth: []
+      - bearerAuth: []
       summary: Create new agent
       tags:
       - agents
@@ -193,7 +199,7 @@ paths:
           schema:
             type: string
       security:
-      - BearerAuth: []
+      - bearerAuth: []
       summary: Execute command on agent
       tags:
       - agents
@@ -220,16 +226,50 @@ paths:
           schema:
             type: string
       security:
-      - BearerAuth: []
+      - bearerAuth: []
       summary: List agent incidents
+      tags:
+      - agents
+  /agents/enroll:
+    post:
+      consumes:
+      - application/json
+      description: Enroll agent with bootstrap token
+      parameters:
+      - description: Bootstrap token
+        in: header
+        name: X-Bootstrap-Token
+        required: false
+        type: string
+      - description: Enrollment payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "429":
+          description: Rate limit exceeded
+          schema:
+            type: string
+      summary: Enroll agent
       tags:
       - agents
   /auth/login:
     post:
       consumes:
       - application/json
-      description: Authenticates user with email and password, returns JWT token in
-        cookie
+      description: Authenticates user with email and password, returns JWT token
       parameters:
       - description: Login credentials
         in: body
@@ -245,6 +285,10 @@ paths:
           schema:
             additionalProperties: true
             type: object
+        "429":
+          description: Rate limit exceeded
+          schema:
+            type: string
         "400":
           description: Invalid request body or missing credentials
           schema:
@@ -262,7 +306,7 @@ paths:
       - auth
   /auth/logout:
     post:
-      description: Clears the authentication cookie
+      description: Logs out the user
       produces:
       - application/json
       responses:
@@ -273,7 +317,7 @@ paths:
               type: boolean
             type: object
       security:
-      - BearerAuth: []
+      - bearerAuth: []
       summary: User logout
       tags:
       - auth
@@ -297,7 +341,7 @@ paths:
           schema:
             type: string
       security:
-      - BearerAuth: []
+      - bearerAuth: []
       summary: Get current user
       tags:
       - auth
@@ -329,7 +373,7 @@ paths:
           schema:
             type: string
       security:
-      - BearerAuth: []
+      - bearerAuth: []
       summary: Analyze incident with AI
       tags:
       - incidents
@@ -366,7 +410,7 @@ paths:
           schema:
             type: string
       security:
-      - BearerAuth: []
+      - bearerAuth: []
       summary: Execute suggested action
       tags:
       - incidents
