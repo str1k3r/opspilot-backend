@@ -28,6 +28,9 @@ func main() {
 	if os.Getenv("JWT_SECRET") == "" {
 		log.Fatal("JWT_SECRET is required")
 	}
+	if os.Getenv("REDIS_URL") == "" {
+		log.Fatal("REDIS_URL is required")
+	}
 
 	// Database connection (with retries)
 	var db *sqlx.DB

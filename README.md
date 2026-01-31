@@ -6,8 +6,11 @@ Go backend for the OpsPilot monitoring platform.
 
 - **Transport**: NATS (JetStream for events, KV for heartbeats, Request-Reply for actions)
 - **Storage**: PostgreSQL (agents + incidents)
+- **Cache**: Redis (agent presence, auth rate limiting)
 - **AI**: OpenRouter (analysis) — optional
 - **Slack**: Stubbed (disabled for now)
+
+Protocol details are documented in `opspilot-agent/PROTOCOL.md`.
 
 ## Prerequisites
 
@@ -45,19 +48,32 @@ DB_HOST=postgres
 DB_USER=ops_user
 DB_PASSWORD=ops_pass
 DB_NAME=opspilot
+REDIS_URL=redis://redis:6379/0
+JWT_SECRET=change_me
 ```
+
+Redis requires keyspace notifications for offline detection:
+```
+notify-keyspace-events Ex
+```
+If disabled, the backend uses a fallback reconciler.
 
 ## API Endpoints
 
-- `GET /v1/agents` — list agents
-- `GET /v1/agents/{id}/incidents` — list incidents for an agent
-- `POST /v1/admin/exec` — execute action on agent (RPC)
-- `POST /v1/incidents/{id}/analyze` — run AI analysis
-- `POST /v1/incidents/{id}/execute` — execute suggested action
+- `GET /api/v1/agents` — list agents
+- `GET /api/v1/agents/{id}/incidents` — list incidents for an agent
+- `POST /api/v1/agents/{id}/execute` — execute action on agent (RPC)
+- `POST /api/v1/incidents/{id}/analyze` — run AI analysis
+- `POST /api/v1/incidents/{id}/execute` — execute suggested action
+
+### Auth (Bearer)
+```
+Authorization: Bearer <jwt>
+```
 
 ### Exec example
 ```bash
-curl -X POST http://localhost:8080/v1/admin/exec \
+curl -X POST http://localhost:8080/api/v1/agents/{id}/execute \
   -H "Content-Type: application/json" \
   -d '{"agent_id":"a1b2c3d4e5f6","command":"restart_service","params":{"service":"nginx"}}'
 ```
@@ -68,6 +84,7 @@ If the agent is offline, the endpoint returns `404`.
 
 - **Events** (JetStream): `ops.{agent_id}.events.*`
 - **Heartbeats** (KV bucket): `AGENTS` key `{agent_id}`
+- **Inventory** (JetStream): `ops.{agent_id}.inventory`
 - **Actions** (RPC): `ops.{agent_id}.rpc`
 
 NATS URL for local dev (docker): `nats://nats:4222`
@@ -115,7 +132,7 @@ opspilot-backend/
 ├── internal/
 │   ├── handlers/            # HTTP handlers (REST + RPC exec)
 │   ├── ingest/              # JetStream consumer + KV watcher
-│   ├── models/              # DB + v3 wire models
+│   ├── models/              # DB + wire models
 │   ├── natsbus/             # NATS connection + infra init
 │   ├── rpc/                 # Request-Reply client
 │   ├── services/            # AI + Slack (stub)
