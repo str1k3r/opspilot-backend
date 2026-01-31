@@ -66,6 +66,11 @@ func main() {
 		log.Fatalf("Failed to start events consumer: %v", err)
 	}
 
+	inventoryConsumer := ingest.NewInventoryConsumer(natsClient.JS(), store)
+	if err := inventoryConsumer.Start(ctx); err != nil {
+		log.Fatalf("Failed to start inventory consumer: %v", err)
+	}
+
 	kvWatcher := ingest.NewKVWatcher(natsClient.KV(), store)
 	if err := kvWatcher.Start(ctx); err != nil {
 		log.Fatalf("Failed to start KV watcher: %v", err)
@@ -98,6 +103,7 @@ func main() {
 		defer shutdownCancel()
 
 		_ = eventsConsumer.Stop()
+		_ = inventoryConsumer.Stop()
 		_ = kvWatcher.Stop()
 		_ = server.Shutdown(shutdownCtx)
 	}()

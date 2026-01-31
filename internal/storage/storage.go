@@ -156,6 +156,16 @@ func (s *Storage) CreateIncident(incident *models.Incident) error {
 	return err
 }
 
+func (s *Storage) InsertInventorySnapshot(agentID, hash string, payload []byte) error {
+	query := `
+		INSERT INTO agents_inventory (agent_id, hash, payload)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (agent_id, hash) DO NOTHING
+	`
+	_, err := s.db.Exec(query, agentID, hash, payload)
+	return err
+}
+
 func (s *Storage) GetIncidents(agentID string, limit int) ([]models.Incident, error) {
 	incidents := make([]models.Incident, 0)
 	query := `
