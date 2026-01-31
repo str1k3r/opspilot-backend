@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"strings"
 )
 
 type contextKey string
@@ -11,13 +12,19 @@ const userIDKey contextKey = "opspilot_user_id"
 
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(cookieName)
-		if err != nil || cookie.Value == "" {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		claims, err := ParseToken(cookie.Value)
+		token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		if token == "" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		claims, err := ParseToken(token)
 		if err != nil || claims.Subject == "" {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return

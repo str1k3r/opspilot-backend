@@ -25,6 +25,10 @@ import (
 )
 
 func main() {
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatal("JWT_SECRET is required")
+	}
+
 	// Database connection (with retries)
 	var db *sqlx.DB
 	var err error
